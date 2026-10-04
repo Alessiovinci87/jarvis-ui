@@ -33,6 +33,8 @@ export type RoutedCommand =
   | { kind: 'sequence'; intents: ActionIntent[] }
   | { kind: 'maybe'; text: string }
   | { kind: 'refused'; reason: string; reply: string }
+  /** A bare verb ("apri", "cerca"): ask what, instantly, instead of a 40 s model round-trip. */
+  | { kind: 'clarify'; reply: string }
   | { kind: 'none' }
 
 const LEADING_ADDRESS = /^\s*(?:ehi|hey|ok|okay|ciao|senti)?\s*jarvis\s*[,:!.]?\s*/i
@@ -57,6 +59,10 @@ const SEARCH_TAIL = /\s+(?:su\s+(?:google|internet|web|chrome|edge)|sul\s+(?:bro
  */
 const ACTION_VERB =
   /\b(?:apri|avvia|lancia|esegui|chiudi|cerca|trova|metti|riproduci|suona|manda|invia|scrivi|imposta|accendi|spegni|mostra|fammi\s+vedere|scarica|installa|crea|cancella|elimina|rinomina|sposta|copia|salva|stampa|ricorda|avvisa|sveglia|abbassa|alza|open|launch|close|search|play|send|set|show)(?:mi|melo|mela|meli|mele|lo|la|li|le|ci|gli)?\b/i
+
+/** Just a verb, optionally with "mi"/"lo"/"la"/"il"/"un" and punctuation: no object to act on. */
+const BARE_VERB =
+  /^(?:apri|aprimi|avvia|lancia|esegui|chiudi|cerca|cercami|trova|trovami|metti|mettimi|riproduci|suona|open|launch|close|search|play|start|run)(?:\s+(?:mi|lo|la|il|un|una|the|a))?[\s.!?]*$/i
 
 /** "chiudi spotify / vs code / il browser" → close_app. */
 const CLOSE_VERB = /\b(?:chiudi(?:mi)?|close|quit|termina)\b/i
@@ -325,6 +331,13 @@ function route(text: string): RoutedCommand {
   }
 
   if (!hasVerb || question || !shortish) return { kind: 'none' }
+
+  // Verb alone, nothing to act on ("Apri.", "cerca", "metti"): ask, do not guess.
+  if (words <= 2 && BARE_VERB.test(text)) {
+    const v = text.toLowerCase().replace(/[^a-zà-ù\s]/g, '').trim().split(/\s+/)[0]
+    const what = /^apr|^avvi|^lanci|^open|^launch/.test(v) ? 'Apro cosa?' : /^cerc|^trov|^search/.test(v) ? 'Cerco cosa?' : /^mett|^riprod|^suon|^play/.test(v) ? 'Metto cosa?' : /^chiud|^close/.test(v) ? 'Chiudo cosa?' : 'Cosa devo fare, esattamente?'
+    return { kind: 'clarify', reply: what }
+  }
 
   // 2b) Music: "metti One degli U2", "riproduci qualcosa dei Pink Floyd", "metti un po' di jazz".
   if (play) {

@@ -88,6 +88,8 @@ export class AudioRecorder {
   private lastVoiceAt = 0
   private autoStopped = false
   private lastResult: Recording | null = null
+  /** RMS of the first 250 ms (room/mic noise), used for the adaptive speech gate. */
+  private noiseFloor = 0
   private stopResolve: ((r: Recording) => void) | null = null
   private readonly opts: Required<Pick<RecorderOptions, 'silenceMs' | 'maxMs' | 'threshold'>> &
     RecorderOptions
@@ -130,6 +132,7 @@ export class AudioRecorder {
     this.recorder = new MediaRecorder(this.stream, mimeType ? { mimeType } : undefined)
     this.chunks = []
     this.lastResult = null
+    this.noiseFloor = 0
     this.speechDetected = false
     this.autoStopped = false
     this.startedAt = performance.now()
@@ -189,11 +192,18 @@ export class AudioRecorder {
     this.opts.onLevel?.(Math.min(1, rms * 6))
 
     const now = performance.now()
-    if (rms > this.opts.threshold) {
+    const elapsed = now - this.startedAt
+    // Adaptive gate: the first 250 ms measure the room's noise floor; speech must rise
+    // clearly above it. Quiet laptop microphones (peak ~0.01) never reached a fixed 0.02.
+    if (elapsed < 250) {
+      this.noiseFloor = Math.max(this.noiseFloor, rms)
+      return
+    }
+    const gate = Math.min(this.opts.threshold, Math.max(0.004, this.noiseFloor * 3))
+    if (rms > gate) {
       this.speechDetected = true
       this.lastVoiceAt = now
     }
-    const elapsed = now - this.startedAt
     const silentFor = now - this.lastVoiceAt
     const endOfSpeech = this.speechDetected && elapsed > 1000 && silentFor > this.opts.silenceMs
     if (endOfSpeech || elapsed > this.opts.maxMs) {

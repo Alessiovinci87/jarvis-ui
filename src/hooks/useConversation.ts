@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { MEMORY_CONTEXT_HEADER, SYSTEM_PROMPT } from '../data/systemPrompt'
 import { actionBridge, sequenceReply } from '../services/actionBridge'
 import {
+  clarificationReply,
   confirmationReply,
   describeIntent,
   isAffirmative,
@@ -29,6 +30,12 @@ const MAX_EVENTS = 8
 const CONFIRM_WINDOW_MS = 60_000
 /** How long the previous desktop command stays relevant for corrections ("no, la cartella Ale"). */
 const CONTEXT_WINDOW_MS = 3 * 60_000
+/**
+ * Ask the local model to classify free-form desktop commands the rules did not match.
+ * Off: on the i7-8665U it takes 13-45 s per sentence (qwen3.5 2b/4b) and every allowlisted
+ * target is already reachable by rule; unknown targets get an instant clarification instead.
+ */
+const MODEL_FOR_COMMANDS = false
 
 interface UseConversationOptions {
   /** Model id to request. */
@@ -250,6 +257,11 @@ export function useConversation({ model, online, onReply, memory }: UseConversat
         finish(routed.reply, 'done', 'ERROR')
         return
       }
+      if (routed.kind === 'clarify') {
+        pushEvent('command incomplete: asking', 'REASONING')
+        finish(routed.reply, 'done', 'RESPONSE')
+        return
+      }
 
       let intents: ActionIntent[]
       if (routed.kind === 'action') {
@@ -265,6 +277,13 @@ export function useConversation({ model, online, onReply, memory }: UseConversat
         // Free-form phrasing: the bridge's classifier (Ollama direct, compact prompt) picks
         // one allowlisted intent. Whatever it proposes is *always* read back and waits for
         // the user's "sì": the model understands, Alessio decides, the bridge acts.
+        if (!MODEL_FOR_COMMANDS) {
+          // On this CPU the classifier costs 13-45 s per sentence and the deterministic rules
+          // already cover every allowlisted target: answer at once with what is available.
+          pushEvent('unknown target: asking', 'REASONING')
+          finish(clarificationReply(), 'done', 'RESPONSE')
+          return
+        }
         setPhase('REASONING')
         pushEvent('interpreting command', 'REASONING')
         let proposed: ActionIntent | null = null
@@ -364,7 +383,7 @@ export function useConversation({ model, online, onReply, memory }: UseConversat
       // Order: second brain (notes/reminders/lists/memory) → desktop commands → chat.
       // Hard refusals from the deny-list come first regardless: they must never reach anything.
       const routed = routeCommand(text)
-      if (routed.kind === 'refused') {
+      if (routed.kind === 'refused' || routed.kind === 'clarify') {
         void runCommand(userMessage, routed)
         return
       }
