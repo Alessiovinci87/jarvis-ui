@@ -14,6 +14,7 @@ import {
 import { cachedSynthesize, prewarm } from '../../services/ttsCache'
 import { CAPABILITY_SUMMARY, STARTUP_GREETING } from '../../data/capabilities'
 import { introThemeAvailable } from '../../services/introTheme'
+import { getPreferredMic, listMics, setPreferredMic, type MicOption } from '../../services/micDevice'
 import type { TtsHealthResponse } from '../../types/speech'
 
 const MUSIC_STORAGE_KEY = 'jarvis.startup.music'
@@ -72,6 +73,23 @@ export function BootScreen({ online, bridgeReady, onStart }: BootScreenProps) {
   }, [])
   const [summary, setSummary] = useState(() => readFlag(SUMMARY_STORAGE_KEY, true))
   const [briefing, setBriefing] = useState(() => readFlag(BRIEFING_STORAGE_KEY, true))
+  // Microphone: explicit choice, so Bluetooth earbuds becoming Windows' default do not silence Jarvis.
+  const [mics, setMics] = useState<MicOption[]>([])
+  const [mic, setMic] = useState<string>(() => getPreferredMic())
+  useEffect(() => {
+    let alive = true
+    void listMics().then((list) => alive && setMics(list))
+    const onChange = () => void listMics().then((list) => alive && setMics(list))
+    navigator.mediaDevices?.addEventListener?.('devicechange', onChange)
+    return () => {
+      alive = false
+      navigator.mediaDevices?.removeEventListener?.('devicechange', onChange)
+    }
+  }, [])
+  const chooseMic = (id: string) => {
+    setMic(id)
+    setPreferredMic(id)
+  }
   const [previewing, setPreviewing] = useState(false)
 
   // Voices load asynchronously in Chrome/Edge.
@@ -177,6 +195,18 @@ export function BootScreen({ online, bridgeReady, onStart }: BootScreenProps) {
             <dd className={kokoro ? 'boot__ok' : 'boot__warn'}>{kokoro ? 'KOKORO' : ttsNow?.available ? 'BACKEND' : 'BROWSER'}</dd>
           </div>
         </dl>
+
+        <label className="boot__field">
+          <span>MIC</span>
+          <select value={mic} onChange={(e) => chooseMic(e.target.value)} aria-label="Microfono" title="Quale microfono usa Jarvis (non segue il predefinito di Windows)">
+            <option value="">Predefinito di Windows</option>
+            {mics.map((m) => (
+              <option key={m.deviceId} value={m.deviceId}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+        </label>
 
         <label className="boot__field">
           <span>VOCE</span>

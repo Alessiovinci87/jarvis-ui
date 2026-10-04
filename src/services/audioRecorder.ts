@@ -4,6 +4,8 @@
  * click twice, and exposes a live level for the UI.
  */
 
+import { getPreferredMic, micConstraints, setPreferredMic } from './micDevice'
+
 export type RecorderErrorCode =
   | 'unsupported'
   | 'permission-denied'
@@ -109,11 +111,19 @@ export class AudioRecorder {
       throw new RecorderError('unsupported', 'MediaRecorder is not available in this browser')
     }
     try {
-      this.stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 },
-      })
+      this.stream = await navigator.mediaDevices.getUserMedia({ audio: micConstraints() })
     } catch (err) {
-      throw mapGetUserMediaError(err)
+      // The remembered microphone may be gone (earbuds off): fall back to the default device.
+      if (err instanceof DOMException && (err.name === 'OverconstrainedError' || err.name === 'NotFoundError') && getPreferredMic()) {
+        setPreferredMic('')
+        try {
+          this.stream = await navigator.mediaDevices.getUserMedia({ audio: micConstraints() })
+        } catch (err2) {
+          throw mapGetUserMediaError(err2)
+        }
+      } else {
+        throw mapGetUserMediaError(err)
+      }
     }
 
     const mimeType = pickMimeType()
