@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { actionBridge } from '../../services/actionBridge'
 import { BRAIN_CHANGED_EVENT, type BrainItem, type BrainToday, type GoogleStatus } from '../../types/brain'
 
-type Tab = 'today' | 'reminder' | 'note' | 'fact' | 'list' | 'google'
+type Tab = 'today' | 'reminder' | 'note' | 'fact' | 'list' | 'routine' | 'google'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'today', label: 'OGGI' },
@@ -11,6 +11,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'note', label: 'NOTE' },
   { id: 'fact', label: 'RICORDI' },
   { id: 'list', label: 'LISTE' },
+  { id: 'routine', label: 'ROUTINE' },
   { id: 'google', label: 'GOOGLE' },
 ]
 
@@ -21,6 +22,8 @@ interface BrainDrawerProps {
   today: BrainToday | null
   /** Something was edited or deleted: the caller refreshes the HUD snapshot. */
   onChanged: () => void
+  /** Routines defined in the bridge's routines.json (read-only here). */
+  routines?: { id: string; label: string; phrases: string[]; steps: { action: string; target: string; query?: string }[] }[]
 }
 
 function fmtDue(due: string | null): string {
@@ -43,7 +46,7 @@ function toLocalInput(due: string | null): string {
  * lists, plus the Google (calendar/mail) connection state. Edits go through the
  * bridge and its audit log; nothing here runs an action on the PC.
  */
-export function BrainDrawer({ open, onClose, bridgeReady, today, onChanged }: BrainDrawerProps) {
+export function BrainDrawer({ open, onClose, bridgeReady, today, onChanged, routines = [] }: BrainDrawerProps) {
   const [tab, setTab] = useState<Tab>('today')
   const [query, setQuery] = useState('')
   const [items, setItems] = useState<BrainItem[]>([])
@@ -56,7 +59,7 @@ export function BrainDrawer({ open, onClose, bridgeReady, today, onChanged }: Br
   const [confirmDelete, setConfirmDelete] = useState<number | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
 
-  const kind = tab === 'today' || tab === 'google' ? null : tab
+  const kind = tab === 'today' || tab === 'google' || tab === 'routine' ? null : tab
 
   const load = useCallback(async () => {
     if (!open || !bridgeReady) return
@@ -229,7 +232,8 @@ export function BrainDrawer({ open, onClose, bridgeReady, today, onChanged }: Br
             {TABS.map((t) => (
               <button key={t.id} type="button" className={`drawer__tab${tab === t.id ? ' drawer__tab--on' : ''}`} onClick={() => { setTab(t.id); setQuery(''); setEditing(null) }}>
                 {t.label}
-                {t.id !== 'today' && t.id !== 'google' && today ? <span className="drawer__count">{today.counts[t.id]}</span> : null}
+                {t.id !== 'today' && t.id !== 'google' && t.id !== 'routine' && today ? <span className="drawer__count">{today.counts[t.id]}</span> : null}
+                {t.id === 'routine' && routines.length ? <span className="drawer__count">{routines.length}</span> : null}
               </button>
             ))}
           </nav>
@@ -288,6 +292,32 @@ export function BrainDrawer({ open, onClose, bridgeReady, today, onChanged }: Br
               ) : (
                 <p className="drawer__hint">Nessuna lista{query ? ' per questa ricerca' : ''}.</p>
               )
+            )}
+
+            {tab === 'routine' && (
+              <div className="drawer__today">
+                <h3 className="hud__label">ROUTINE (SOLO A COMANDO)</h3>
+                {routines.length ? (
+                  routines.map((r) => (
+                    <section key={r.id} className="drawer__group">
+                      <p className="brainlist__text">
+                        <strong>{r.label}</strong> · dì: {r.phrases.map((p) => `«${p}»`).join(', ')}
+                      </p>
+                      <ol className="drawer__steps">
+                        {r.steps.map((s, i) => (
+                          <li key={i}>
+                            {s.action} → {s.target}
+                            {s.query ? ` «${s.query}»` : ''}
+                          </li>
+                        ))}
+                      </ol>
+                    </section>
+                  ))
+                ) : (
+                  <p className="drawer__hint">Nessuna routine. Si definiscono in <code>jarvis-bridge/routines.json</code>: nome, frasi che la attivano, e i passi (solo azioni della allowlist). Riavvia il bridge dopo le modifiche.</p>
+                )}
+                <p className="drawer__hint">Una routine parte solo quando pronunci una delle sue frasi. Ogni passo viene eseguito e registrato come un comando singolo.</p>
+              </div>
             )}
 
             {tab === 'google' && (

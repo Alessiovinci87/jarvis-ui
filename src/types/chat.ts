@@ -117,4 +117,6 @@ export interface ConversationMessage {
   usage?: ChatUsage
   /** Jarvis spoke on his own initiative (timer fired, startup greeting…): always voiced. */
   proactive?: boolean
+  /** Reply arrived as a stream and its sentences were already queued for speech. */
+  streamed?: boolean
 }

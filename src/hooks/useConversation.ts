@@ -46,6 +46,12 @@ interface UseConversationOptions {
   onReply?: (message: ConversationMessage) => void
   /** Personal memory: explicit store + retrieval before each question. Optional. */
   memory?: MemoryController | null
+  /** Chat through the bridge (Ollama direct, streamed) instead of OpenJarvis. */
+  bridgeChat?: boolean
+  /** Called with each completed sentence of a streamed reply (for early speech). */
+  onSentence?: (sentence: string) => void
+  /** Routines from the bridge: phrase → allowlisted steps. */
+  routines?: { id: string; label: string; phrases: string[]; steps: ActionIntent[] }[]
 }
 
 export interface ConversationState {
@@ -66,7 +72,7 @@ function buildMemoryContext(hits: MemoryHit[]): string {
   return `${MEMORY_CONTEXT_HEADER}\n${lines.join('\n')}`
 }
 
-export function useConversation({ model, online, onReply, memory }: UseConversationOptions): ConversationState {
+export function useConversation({ model, online, onReply, memory, bridgeChat = false, onSentence, routines = [] }: UseConversationOptions): ConversationState {
   const onReplyRef = useRef(onReply)
   useEffect(() => {
     onReplyRef.current = onReply
@@ -75,6 +81,14 @@ export function useConversation({ model, online, onReply, memory }: UseConversat
   useEffect(() => {
     memoryRef.current = memory
   }, [memory])
+  const bridgeChatRef = useRef(bridgeChat)
+  const onSentenceRef = useRef(onSentence)
+  const routinesRef = useRef(routines)
+  useEffect(() => {
+    bridgeChatRef.current = bridgeChat
+    onSentenceRef.current = onSentence
+    routinesRef.current = routines
+  }, [bridgeChat, onSentence, routines])
 
   const [messages, setMessages] = useState<ConversationMessage[]>([])
   const messagesRef = useRef<ConversationMessage[]>([])
@@ -191,6 +205,37 @@ export function useConversation({ model, online, onReply, memory }: UseConversat
         if (hits.length > 0) payload.push({ role: 'system', content: buildMemoryContext(hits) })
         payload.push(...history)
 
+        if (bridgeChatRef.current) {
+          // Bridge → Ollama, streamed: text appears as it is generated and each finished
+          // sentence is handed to the voice queue, so Jarvis starts talking early.
+          let full = ''
+          let spokenUpTo = 0
+          const flushSentences = (final: boolean) => {
+            const tail = full.slice(spokenUpTo)
+            const m = final ? null : /^[\s\S]*?[.!?…](?:\s|$)/.exec(tail)
+            const chunk = final ? tail : m?.[0]
+            if (!chunk || !chunk.trim()) return
+            spokenUpTo += chunk.length
+            onSentenceRef.current?.(chunk.trim())
+            if (!final) flushSentences(false)
+          }
+          const plain = payload
+            .filter((m) => m.role === 'system' || m.role === 'user' || m.role === 'assistant')
+            .map((m) => ({ role: m.role as 'system' | 'user' | 'assistant', content: typeof m.content === 'string' ? m.content : '' }))
+          const stats = await actionBridge.chatStream(plain, (delta) => {
+            full += delta
+            setMessages((prev) => prev.map((m) => (m.id === pending.id ? { ...m, content: full } : m)))
+            flushSentences(false)
+          }, { maxTokens: 350 })
+          flushSentences(true)
+          const content = full.trim()
+          const reply: ConversationMessage = { ...pending, content: content || '(empty response)', timestamp: Date.now(), status: 'done', streamed: true }
+          setMessages((prev) => prev.map((m) => (m.id === pending.id ? reply : m)))
+          onReplyRef.current?.(reply)
+          pushEvent(`response streamed (${stats.tokens} tok, ${stats.seconds}s, ${stats.model})`, 'VOICE')
+          settle('RESPONSE')
+          return
+        }
         const res = await openJarvisApi.sendChatMessage(payload, { model })
         const choice = res.choices[0]
         const content = choice?.message.content?.trim() ?? ''
@@ -367,6 +412,15 @@ export function useConversation({ model, online, onReply, memory }: UseConversat
           onReplyRef.current?.(reply)
           return
         }
+      }
+
+      // Routines ("modalità lavoro"): a phrase you defined → its allowlisted steps, in order.
+      const spoken = text.toLowerCase().replace(/^(?:ehi|hey|ok|ciao)?\s*jarvis[,:!.]?\s*/i, '').replace(/[.!?]+$/, '').trim()
+      const routine = routinesRef.current.find((r) => r.phrases.some((p) => spoken === p || spoken === `avvia ${p}` || spoken === `attiva ${p}` || spoken === `routine ${p}`))
+      if (routine) {
+        pushEvent(`routine: ${routine.label} (${routine.steps.length} steps)`, 'REASONING')
+        void runCommand(userMessage, { kind: 'sequence', intents: routine.steps })
+        return
       }
 
       // Correction of the previous desktop command ("nooo, la cartella Ale"): same action, new target.

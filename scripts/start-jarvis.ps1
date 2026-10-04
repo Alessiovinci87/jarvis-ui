@@ -169,7 +169,11 @@ if ($u) { Write-Ok "UI $UiUrl" } else { Write-Warn2 'UI did not respond (see .ja
 # Only when the UI was started by this run: re-running the script to restart a backend
 # component must not pile up browser tabs.
 if (-not $NoBrowser -and $u -and $started.ui) {
-  Start-Process $UiUrl
+  # Own window (Chrome/Edge "app" mode: no tabs, no address bar) when available; plain browser otherwise.
+  $chrome = @("$env:ProgramFiles\Google\Chrome\Application\chrome.exe", "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe",
+              "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe", "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe",
+              "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+  if ($chrome) { Start-Process $chrome "--app=$UiUrl --window-size=1600,950" } else { Start-Process $UiUrl }
 } elseif ($u -and $existing.ui) {
   Write-Ok "UI already open in the browser (not reopening)"
 }

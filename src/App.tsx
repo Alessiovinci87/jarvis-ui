@@ -26,7 +26,7 @@ import { useSimulatedActivity } from './hooks/useSimulatedActivity'
 import { useVoice } from './hooks/useVoice'
 import { useWebGLSupport } from './hooks/useWebGLSupport'
 import { PHASE_NODES, type ActivityEvent, type NodeId } from './types/ai'
-import type { BridgeLastAction } from './types/actions'
+import type { ActionIntent, BridgeLastAction } from './types/actions'
 import { BRAIN_CHANGED_EVENT, type BrainToday, type BridgeReminderEvent } from './types/brain'
 import type { ConversationMessage } from './types/chat'
 
@@ -49,6 +49,17 @@ function App() {
   const [lastAction, setLastAction] = useState<BridgeLastAction | null>(null)
   const [today, setToday] = useState<BrainToday | null>(null)
   const memory = useMemory({ bridgeReady })
+  // Chat via the bridge (Ollama direct, streamed) when its model is available; routines from routines.json.
+  const [chatAvailable, setChatAvailable] = useState(false)
+  const bridgeChat = bridgeReady && chatAvailable
+  const [routines, setRoutines] = useState<{ id: string; label: string; phrases: string[]; steps: ActionIntent[] }[]>([])
+  useEffect(() => {
+    if (!bridgeReady) return
+    const controller = new AbortController()
+    void actionBridge.chatStatus(controller.signal).then((s) => !controller.signal.aborted && setChatAvailable(s.available)).catch(() => setChatAvailable(false))
+    void actionBridge.routines(controller.signal).then((r) => !controller.signal.aborted && setRoutines(r.routines)).catch(() => undefined)
+    return () => controller.abort()
+  }, [bridgeReady])
   // Drawer with everything Jarvis knows (notes, reminders, lists, Google state). Toggle: button or Ctrl+M.
   const [drawerOpen, setDrawerOpen] = useState(false)
   const refreshToday = useCallback(() => {
@@ -71,7 +82,10 @@ function App() {
     window.addEventListener(BRAIN_CHANGED_EVENT, onChanged)
     return () => window.removeEventListener(BRAIN_CHANGED_EVENT, onChanged)
   }, [refreshToday])
-  const conversation = useConversation({ model, online, onReply, memory })
+  // Streamed sentences go to the voice queue; `voice` is created below, hence the ref.
+  const enqueueRef = useRef<(s: string) => void>(() => undefined)
+  const onSentence = useCallback((s: string) => enqueueRef.current(s), [])
+  const conversation = useConversation({ model, online, onReply, memory, bridgeChat, onSentence, routines })
   const [input, setInput] = useState('')
 
   // Always call the latest `send` from timers without re-creating callbacks.
@@ -99,7 +113,35 @@ function App() {
   })
   useEffect(() => {
     replyRef.current = voice.onReply
-  }, [voice.onReply])
+    enqueueRef.current = voice.enqueueSpeech
+  }, [voice.onReply, voice.enqueueSpeech])
+
+  // Push-to-talk: hold Ctrl+Space to record, release to send. Ignored while typing in a field.
+  const pressRef = useRef({ start: voice.pressStart, end: voice.pressEnd })
+  useEffect(() => {
+    pressRef.current = { start: voice.pressStart, end: voice.pressEnd }
+  }, [voice.pressStart, voice.pressEnd])
+  useEffect(() => {
+    let held = false
+    const typing = (e: KeyboardEvent) => (e.target as HTMLElement | null)?.tagName === 'INPUT' || (e.target as HTMLElement | null)?.tagName === 'TEXTAREA'
+    const down = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey && e.code === 'Space') || e.repeat || typing(e)) return
+      e.preventDefault()
+      held = true
+      pressRef.current.start()
+    }
+    const up = (e: KeyboardEvent) => {
+      if (!held || (e.code !== 'Space' && e.key !== 'Control')) return
+      held = false
+      pressRef.current.end()
+    }
+    window.addEventListener('keydown', down)
+    window.addEventListener('keyup', up)
+    return () => {
+      window.removeEventListener('keydown', down)
+      window.removeEventListener('keyup', up)
+    }
+  }, [])
 
   // Proactive lines (startup greeting, timers) go through the latest `announce`.
   const announceRef = useRef(conversation.announce)
@@ -216,6 +258,8 @@ function App() {
         wakeProvider={voice.wakeWord.provider}
         bridgeReady={bridgeReady}
         lastAction={lastAction}
+        micWarning={voice.micWarning}
+        bridgeChat={bridgeChat}
       />
       <ConversationLog messages={conversation.messages} />
       <ActivityPanel
@@ -229,7 +273,7 @@ function App() {
           />
         }
       />
-      <BrainDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} bridgeReady={bridgeReady} today={today} onChanged={refreshToday} />
+      <BrainDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} bridgeReady={bridgeReady} today={today} onChanged={refreshToday} routines={routines} />
       <CommandBar
         value={input}
         onChange={setInput}

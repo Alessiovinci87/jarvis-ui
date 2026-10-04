@@ -48,6 +48,13 @@ export interface VoiceController {
   supported: boolean
   /** Backend STT reachable (null = not checked yet). */
   sttAvailable: boolean | null
+  /** 'MUTO?' / 'BASSO' after a silent recording, null otherwise. */
+  micWarning: string | null
+  /** Speak one sentence of a streamed reply (voice turns only); sentences queue in order. */
+  enqueueSpeech: (text: string) => void
+  /** Push-to-talk: hold starts listening, release stops and transcribes. */
+  pressStart: () => void
+  pressEnd: () => void
   ttsProvider: SpeechProvider
   /** Live microphone level 0..1 while listening. */
   level: number
@@ -101,6 +108,8 @@ function describeRecorderError(err: unknown): string {
 export function useVoice({ online, onTranscript, conversationPhase, busy }: UseVoiceOptions): VoiceController {
   const supported = useMemo(() => isRecordingSupported(), [])
   const [own, setOwn] = useState<OwnState>('IDLE')
+  /** 'MUTO?' / 'BASSO' when the last recording had no usable signal; null when fine. */
+  const [micWarning, setMicWarning] = useState<string | null>(null)
   const [level, setLevel] = useState(0)
   const [events, setEvents] = useState<ActivityEvent[]>([])
   const [sttAvailable, setSttAvailable] = useState<boolean | null>(null)
@@ -218,8 +227,22 @@ export function useVoice({ online, onTranscript, conversationPhase, busy }: UseV
         if (!text) {
           pushEvent('no speech detected')
           setOwn('IDLE')
+          // Was the recording silent? The bridge reports the input peak: zero means a muted/wrong mic.
+          void actionBridge
+            .sttHealth()
+            .then((h) => {
+              if (h.last_peak !== null && h.last_peak < 0.002) {
+                setMicWarning('MUTO?')
+                pushEvent('mic: nessun segnale (muto o dispositivo sbagliato)', 'SYSTEM')
+              } else if (h.last_peak !== null && h.last_peak < 0.02) {
+                setMicWarning('BASSO')
+                pushEvent('mic: segnale molto basso', 'SYSTEM')
+              }
+            })
+            .catch(() => undefined)
           return
         }
+        setMicWarning(null)
         pushEvent(`heard: ${text.length > 42 ? `${text.slice(0, 42)}…` : text}`)
         voiceTurn.current = true
         setOwn('WAITING')
@@ -402,6 +425,14 @@ export function useVoice({ online, onTranscript, conversationPhase, busy }: UseV
         return
       }
       if (message.status !== 'done') return
+      if (message.streamed) {
+        // Sentences were already queued while streaming; nothing left to say here.
+        if (!speakingNow.current && speechQueue.current.length === 0) {
+          voiceTurn.current = false
+          setOwn((s) => (s === 'SPEAKING' || s === 'WAITING' ? 'IDLE' : s))
+        }
+        return
+      }
       const speaker = output.current
       if (!speaker) {
         pushEvent('voice output unavailable', 'SYSTEM')
@@ -441,6 +472,28 @@ export function useVoice({ online, onTranscript, conversationPhase, busy }: UseV
     onReplyRef.current = onReply
   }, [onReply])
 
+  /* ---- streamed replies: one sentence at a time, in order, only for voice turns ---- */
+  const enqueueSpeech = useCallback((text: string) => {
+    const t = text.trim()
+    if (!t || !voiceTurn.current) return
+    onReplyRef.current?.({ id: -1, role: 'assistant', content: t, timestamp: Date.now(), status: 'done', proactive: true })
+  }, [])
+
+  /* ---- push-to-talk (Ctrl+Space held): start on press, transcribe on release ---- */
+  const pressStart = useCallback(() => {
+    if (own === 'IDLE' || own === 'ERROR') void startListening()
+    else if (own === 'SPEAKING') {
+      output.current?.stop()
+      speechQueue.current = []
+      voiceTurn.current = false
+      setOwn('IDLE')
+      void startListening()
+    }
+  }, [own, startListening])
+  const pressEnd = useCallback(() => {
+    if (own === 'LISTENING') void stopListening()
+  }, [own, stopListening])
+
   /* ---- a new request interrupts any ongoing speech ---- */
   useEffect(() => {
     if (busy && output.current?.speaking) {
@@ -475,6 +528,10 @@ export function useVoice({ online, onTranscript, conversationPhase, busy }: UseV
     own === 'LISTENING' || own === 'TRANSCRIBING' || own === 'SPEAKING' ? own : own === 'ERROR' ? 'ERROR' : null
 
   return {
+    micWarning,
+    enqueueSpeech,
+    pressStart,
+    pressEnd,
     state,
     phaseOverride,
     supported,

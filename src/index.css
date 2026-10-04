@@ -331,6 +331,10 @@ body {
   text-shadow: 0 0 8px var(--cyan-dim);
 }
 
+.status__warn {
+  color: #c9873a;
+}
+
 /* Second brain: today's agenda under MEMORY */
 
 .brain__label {

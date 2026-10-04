@@ -164,7 +164,7 @@ export const actionBridge = {
   eventsUrl: () => `${BRIDGE_BASE_URL}/events`,
 
   sttHealth: (signal?: AbortSignal) =>
-    request<{ available: boolean; loaded: boolean; model: string; reason: string | null }>('/stt/health', { signal }),
+    request<{ available: boolean; loaded: boolean; model: string; reason: string | null; last_peak: number | null }>('/stt/health', { signal }),
 
   /**
    * Speech-to-text with the command vocabulary as Whisper prompt (same model as
@@ -208,6 +208,60 @@ export const actionBridge = {
     })
     return { ...res, intent: isActionIntent(res.intent) ? res.intent : null }
   },
+
+  /* ---- conversation via the bridge (Ollama direct, streamed) ---- */
+
+  chatStatus: (signal?: AbortSignal) =>
+    request<{ available: boolean; model: string; models: string[] }>('/chat/status', { signal }),
+
+  /**
+   * Streams a reply token by token. `onDelta` receives each fragment; resolves with the
+   * final stats when the model is done. Rejects on transport or model error.
+   */
+  async chatStream(
+    messages: { role: 'system' | 'user' | 'assistant'; content: string }[],
+    onDelta: (text: string) => void,
+    opts: { signal?: AbortSignal; maxTokens?: number; temperature?: number } = {},
+  ): Promise<{ model: string; seconds: number; tokens: number }> {
+    const res = await fetch(`${BRIDGE_BASE_URL}/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ messages, max_tokens: opts.maxTokens ?? 350, temperature: opts.temperature ?? 0.7 }),
+      signal: opts.signal,
+    })
+    if (!res.ok || !res.body) throw new BridgeError(`bridge chat error ${res.status}`, res.status)
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let done: { model: string; seconds: number; tokens: number } | null = null
+    const handle = (block: string) => {
+      const ev = /^event:\s*(\w+)/m.exec(block)?.[1]
+      const dataLine = /^data:\s*(.*)$/m.exec(block)?.[1]
+      if (!ev || dataLine === undefined) return
+      const data = JSON.parse(dataLine) as { delta?: string; error?: string; model?: string; seconds?: number; tokens?: number }
+      if (ev === 'delta' && data.delta) onDelta(data.delta)
+      else if (ev === 'error') throw new BridgeError(data.error ?? 'chat error', null, 'chat_error')
+      else if (ev === 'done') done = { model: data.model ?? '', seconds: data.seconds ?? 0, tokens: data.tokens ?? 0 }
+    }
+    for (;;) {
+      const { value, done: eof } = await reader.read()
+      if (eof) break
+      buffer += decoder.decode(value, { stream: true })
+      let idx: number
+      while ((idx = buffer.indexOf('\n\n')) >= 0) {
+        const block = buffer.slice(0, idx)
+        buffer = buffer.slice(idx + 2)
+        handle(block)
+      }
+    }
+    if (buffer.trim()) handle(buffer)
+    if (!done) throw new BridgeError('chat stream ended without done', null, 'chat_error')
+    return done
+  },
+
+  /** Routines: phrase → sequence of allowlisted steps (defined in the bridge's routines.json). */
+  routines: (signal?: AbortSignal) =>
+    request<{ routines: { id: string; label: string; phrases: string[]; steps: ActionIntent[] }[] }>('/routines', { signal }),
 
   /* ---- second brain (notes, facts, reminders, lists): all local, in the bridge ---- */
 

@@ -18,6 +18,10 @@ interface TopStatusProps {
   bridgeReady: boolean
   /** Last action the bridge executed (audit log), if any. */
   lastAction: BridgeLastAction | null
+  /** 'MUTO?' / 'BASSO' after a silent recording. */
+  micWarning?: string | null
+  /** Chat served by the bridge (Ollama direct, streamed) rather than OpenJarvis. */
+  bridgeChat?: boolean
 }
 
 const fade = {
@@ -48,7 +52,7 @@ function micLabel(state: VoiceState, supported: boolean, wakeArmed: boolean, pro
   }
 }
 
-export function TopStatus({ phase, backend, voiceState, micSupported, wakeArmed, wakeProvider, bridgeReady, lastAction }: TopStatusProps) {
+export function TopStatus({ phase, backend, voiceState, micSupported, wakeArmed, wakeProvider, bridgeReady, lastAction, micWarning = null, bridgeChat = false }: TopStatusProps) {
   const online = backend.status === 'online'
   const model = backend.info?.model ?? backend.models[0]?.id ?? 'LOCAL'
   const dotClass = `status__dot status__dot--${backend.status}`
@@ -82,7 +86,9 @@ export function TopStatus({ phase, backend, voiceState, micSupported, wakeArmed,
           </div>
           <div className="status__row">
             <dt>BACKEND</dt>
-            <dd>{online ? (backend.info?.engine ?? 'ok').toUpperCase() : 'DEMO'}</dd>
+            <dd title={bridgeChat ? 'Conversazione via bridge: Ollama in diretta, risposta in streaming' : undefined}>
+              {bridgeChat ? 'BRIDGE·OLLAMA' : online ? (backend.info?.engine ?? 'ok').toUpperCase() : 'DEMO'}
+            </dd>
           </div>
           <div className="status__row">
             <dt>AGENTS</dt>
@@ -94,7 +100,7 @@ export function TopStatus({ phase, backend, voiceState, micSupported, wakeArmed,
               className={micActive ? 'status__live' : undefined}
               title={wakeProvider === 'local' ? 'Wake word: offline model, audio stays on this PC' : wakeProvider === 'browser' ? 'Wake word: browser recogniser (may use online services)' : undefined}
             >
-              {micLabel(voiceState, micSupported, wakeArmed, wakeProvider)}
+              {micWarning && !micActive ? <span className="status__warn" title="L'ultima registrazione non conteneva segnale: controlla microfono (mute, dispositivo) nel BootScreen o in Windows">{micWarning}</span> : micLabel(voiceState, micSupported, wakeArmed, wakeProvider)}
             </dd>
           </div>
           <div className="status__row">
