@@ -8,4 +8,11 @@ export default defineConfig({
     react(),
     babel({ presets: [reactCompilerPreset()] })
   ],
+  server: {
+    // Reached through `tailscale serve` (https://<pc>.<tailnet>.ts.net → localhost:5173).
+    allowedHosts: ['.ts.net'],
+  },
+  preview: {
+    allowedHosts: ['.ts.net'],
+  },
 })

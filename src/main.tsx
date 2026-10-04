@@ -8,3 +8,12 @@ createRoot(document.getElementById('root')!).render(
     <App />
   </StrictMode>,
 )
+
+// PWA: the service worker only handles push notifications and the install prompt.
+// It is a no-op on plain http://localhost (service workers require a secure context,
+// which localhost counts as) and simply skipped where unsupported.
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => undefined)
+  })
+}

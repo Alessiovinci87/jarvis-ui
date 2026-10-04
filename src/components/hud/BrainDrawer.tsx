@@ -1,6 +1,7 @@
 import { AnimatePresence, motion } from 'framer-motion'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { actionBridge } from '../../services/actionBridge'
+import { disablePush, enablePush, pushState, testPush, type PushState } from '../../services/push'
 import { BRAIN_CHANGED_EVENT, type BrainItem, type BrainToday, type GoogleStatus } from '../../types/brain'
 
 type Tab = 'today' | 'reminder' | 'note' | 'fact' | 'list' | 'routine' | 'google'
@@ -58,6 +59,27 @@ export function BrainDrawer({ open, onClose, bridgeReady, today, onChanged, rout
   const [editing, setEditing] = useState<{ id: number; text: string; due: string } | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<number | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
+  // Notifications on this device (Web Push): state is read when the drawer opens.
+  const [push, setPush] = useState<PushState | null>(null)
+  const [pushMsg, setPushMsg] = useState<string | null>(null)
+  useEffect(() => {
+    if (!open) return
+    void pushState().then(setPush).catch(() => setPush('unsupported'))
+  }, [open])
+  const togglePush = async () => {
+    setPushMsg(null)
+    try {
+      const next = push === 'on' ? await disablePush() : await enablePush()
+      setPush(next)
+      if (next === 'on') {
+        const sent = await testPush()
+        setPushMsg(sent ? 'Notifica di prova inviata.' : 'Iscritto, ma la prova non è partita.')
+      }
+      if (next === 'denied') setPushMsg('Permesso negato dal browser: sbloccalo dalle impostazioni del sito.')
+    } catch (err) {
+      setPushMsg(err instanceof Error ? err.message : String(err))
+    }
+  }
 
   const kind = tab === 'today' || tab === 'google' || tab === 'routine' ? null : tab
 
@@ -271,6 +293,20 @@ export function BrainDrawer({ open, onClose, bridgeReady, today, onChanged, rout
                   ) : (
                     <p className="drawer__hint">Nessuna lista. Dimmi: «aggiungi il latte alla spesa».</p>
                   )}
+                  <h3 className="hud__label">NOTIFICHE SU QUESTO DISPOSITIVO</h3>
+                  {push === 'unsupported' && <p className="drawer__hint">Questo browser non supporta le notifiche push.</p>}
+                  {push === 'insecure' && (
+                    <p className="drawer__hint">Servono HTTPS: apri Jarvis dall'indirizzo Tailscale (https://alessio.tail43e30f.ts.net) e torna qui.</p>
+                  )}
+                  {(push === 'on' || push === 'off' || push === 'denied') && (
+                    <p className="drawer__hint">
+                      <button type="button" className="brainlist__btn" onClick={() => void togglePush()} disabled={push === 'denied'}>
+                        {push === 'on' ? 'Disattiva notifiche' : 'Attiva notifiche'}
+                      </button>
+                      {push === 'on' ? ' I promemoria arrivano qui anche con Jarvis chiuso.' : ' Promemoria come notifica, senza servizi terzi.'}
+                    </p>
+                  )}
+                  {pushMsg && <p className="drawer__hint">{pushMsg}</p>}
                 </div>
               ) : (
                 <p className="drawer__hint">--</p>

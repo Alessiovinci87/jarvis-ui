@@ -460,7 +460,7 @@ export function useConversation({ model, online, onReply, memory, bridgeChat = f
           await runCommand(userMessage, routed)
           return
         }
-        if (!online) {
+        if (!online && !bridgeChatRef.current) {
           pushEvent('backend offline: request not sent', 'SYSTEM')
           const reply: ConversationMessage = {
             id: nextId.current++,

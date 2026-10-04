@@ -18,8 +18,20 @@ import {
 import type { TranscribeResponse } from '../types/speech'
 import type { BrainItem, BrainItemPatch, BrainItemsResponse, BrainOutcome, BrainRecallHit, BrainToday, GoogleStatus } from '../types/brain'
 
-export const BRIDGE_BASE_URL: string =
-  (import.meta.env.VITE_JARVIS_BRIDGE_URL as string | undefined) ?? 'http://127.0.0.1:8765'
+/**
+ * Bridge address. On the PC it is loopback. When the UI is opened over the tailnet
+ * (https://<pc>.<tailnet>.ts.net, via `tailscale serve`) the bridge is published on
+ * port 8443 of the same host, so the phone reaches it without any public exposure.
+ */
+function defaultBridgeUrl(): string {
+  const env = import.meta.env.VITE_JARVIS_BRIDGE_URL as string | undefined
+  if (env) return env
+  const { hostname, protocol } = window.location
+  if (hostname === 'localhost' || hostname === '127.0.0.1') return 'http://127.0.0.1:8765'
+  return `${protocol}//${hostname}:8443`
+}
+
+export const BRIDGE_BASE_URL: string = defaultBridgeUrl()
 
 const DEFAULT_TIMEOUT_MS = 4000
 
