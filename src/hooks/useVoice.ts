@@ -119,6 +119,9 @@ export function useVoice({ online, onTranscript, conversationPhase, busy }: UseV
   const errorTimer = useRef<number | undefined>(undefined)
   const nextId = useRef(1)
   const voiceTurn = useRef(false)
+  /** True while a reply is being spoken; proactive lines arriving meanwhile wait in `speechQueue`. */
+  const speakingNow = useRef(false)
+  const speechQueue = useRef<ConversationMessage[]>([])
   const onTranscriptRef = useRef(onTranscript)
   useEffect(() => {
     onTranscriptRef.current = onTranscript
@@ -406,6 +409,13 @@ export function useVoice({ online, onTranscript, conversationPhase, busy }: UseV
         setOwn('IDLE')
         return
       }
+      // Proactive lines (greeting, briefing, reminders) never cut each other off: they queue.
+      // A reply to a new request still interrupts (see the `busy` effect below).
+      if (message.proactive && speakingNow.current) {
+        speechQueue.current.push(message)
+        return
+      }
+      speakingNow.current = true
       setOwn('SPEAKING')
       pushEvent('speaking')
       speaker
@@ -414,16 +424,29 @@ export function useVoice({ online, onTranscript, conversationPhase, busy }: UseV
           pushEvent(`voice output failed: ${err instanceof Error ? err.message : String(err)}`, 'SYSTEM'),
         )
         .finally(() => {
+          speakingNow.current = false
+          const next = speechQueue.current.shift()
+          if (next) {
+            onReplyRef.current?.(next)
+            return
+          }
           voiceTurn.current = false
           setOwn((s) => (s === 'SPEAKING' ? 'IDLE' : s))
         })
     },
     [pushEvent],
   )
+  const onReplyRef = useRef<typeof onReply | null>(null)
+  useEffect(() => {
+    onReplyRef.current = onReply
+  }, [onReply])
 
   /* ---- a new request interrupts any ongoing speech ---- */
   useEffect(() => {
-    if (busy && output.current?.speaking) output.current.stop()
+    if (busy && output.current?.speaking) {
+      speechQueue.current = []
+      output.current.stop()
+    }
   }, [busy])
 
   /* ---- cleanup ---- */
