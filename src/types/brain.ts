@@ -78,6 +78,9 @@ export interface GoogleStatus {
   setup: string | null
 }
 
+/** Window event fired by the UI after the brain stored/changed something, so panels refresh at once. */
+export const BRAIN_CHANGED_EVENT = 'jarvis:brain-changed'
+
 /** SSE `reminder` event on the bridge's /events stream. */
 export interface BridgeReminderEvent {
   type: 'reminder'

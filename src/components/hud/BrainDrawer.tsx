@@ -1,7 +1,7 @@
 import { AnimatePresence, motion } from 'framer-motion'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { actionBridge } from '../../services/actionBridge'
-import type { BrainItem, BrainToday, GoogleStatus } from '../../types/brain'
+import { BRAIN_CHANGED_EVENT, type BrainItem, type BrainToday, type GoogleStatus } from '../../types/brain'
 
 type Tab = 'today' | 'reminder' | 'note' | 'fact' | 'list' | 'google'
 
@@ -82,10 +82,15 @@ export function BrainDrawer({ open, onClose, bridgeReady, today, onChanged }: Br
     }
   }, [open, bridgeReady, tab, kind, query, includeDone])
 
-  // Debounced reload on tab / search changes.
+  // Debounced reload on tab / search changes, and at once when Jarvis stores something.
   useEffect(() => {
     const t = window.setTimeout(() => void load(), 200)
-    return () => window.clearTimeout(t)
+    const onChanged = () => void load()
+    window.addEventListener(BRAIN_CHANGED_EVENT, onChanged)
+    return () => {
+      window.clearTimeout(t)
+      window.removeEventListener(BRAIN_CHANGED_EVENT, onChanged)
+    }
   }, [load])
 
   useEffect(() => {

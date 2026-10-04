@@ -7,12 +7,11 @@ export const STARTUP_GREETING = 'Ciao Ale, in cosa posso esserti utile?'
 
 /** Spoken after the greeting; one breath, no lists (it is read by TTS). */
 export const CAPABILITY_SUMMARY = [
-  'Al momento so aprire e chiudere VS Code, Spotify e il browser,',
-  'aprire i progetti Jarvis UI e OpenJarvis e la cartella Download,',
-  'mettere la musica che vuoi su Spotify e controllarla,',
-  'cercare sul web, dirti il meteo, impostare timer e sveglie,',
-  'trovare i tuoi file e ricordare quello che mi chiedi di tenere a mente.',
-  'Per il resto, chiedi pure.',
+  'Sono il tuo secondo cervello: prendo appunti, ricordo quello che mi dici, tengo promemoria con data e ora e le tue liste, come la spesa.',
+  'Ti avviso quando scade qualcosa e la mattina ti faccio il punto della giornata, meteo compreso.',
+  'Sul PC apro e chiudo VS Code, Spotify e il browser, apro i tuoi progetti e le cartelle, trovo file, metto la musica, cerco sul web, imposto timer.',
+  'Le azioni le faccio solo quando me le chiedi tu, e se non sono sicuro ti chiedo conferma.',
+  'Tutto quello che ti salvo lo trovi nel pannello Memoria, con control M.',
 ].join(' ')
 
 /**

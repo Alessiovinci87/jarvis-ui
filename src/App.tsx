@@ -27,7 +27,7 @@ import { useVoice } from './hooks/useVoice'
 import { useWebGLSupport } from './hooks/useWebGLSupport'
 import { PHASE_NODES, type ActivityEvent, type NodeId } from './types/ai'
 import type { BridgeLastAction } from './types/actions'
-import type { BrainToday, BridgeReminderEvent } from './types/brain'
+import { BRAIN_CHANGED_EVENT, type BrainToday, type BridgeReminderEvent } from './types/brain'
 import type { ConversationMessage } from './types/chat'
 
 const FALLBACK_MODEL = 'qwen3.5:2b'
@@ -65,6 +65,12 @@ function App() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [])
+  // Anything stored by the brain (reminder, note, list…) shows up in the HUD immediately.
+  useEffect(() => {
+    const onChanged = () => refreshToday()
+    window.addEventListener(BRAIN_CHANGED_EVENT, onChanged)
+    return () => window.removeEventListener(BRAIN_CHANGED_EVENT, onChanged)
+  }, [refreshToday])
   const conversation = useConversation({ model, online, onReply, memory })
   const [input, setInput] = useState('')
 

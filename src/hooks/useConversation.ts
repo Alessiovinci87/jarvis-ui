@@ -11,7 +11,7 @@ import {
   type RoutedCommand,
 } from '../services/commandRouter'
 import { openJarvisApi, OpenJarvisApiError } from '../services/openJarvisApi'
-import type { BrainOutcome } from '../types/brain'
+import { BRAIN_CHANGED_EVENT, type BrainOutcome } from '../types/brain'
 import type { ActionIntent } from '../types/actions'
 import { PHASE_NODES, type ActivityEvent, type AiActivityState, type AiPhase, type NodeId } from '../types/ai'
 import type { ChatRequestMessage, ConversationMessage } from '../types/chat'
@@ -118,7 +118,11 @@ export function useConversation({ model, online, onReply, memory }: UseConversat
         const out = await actionBridge.brain(text, true)
         if (!out.handled) return null
         pushEvent(`brain: ${out.kind}/${out.op}${out.source === 'model' ? ' (model)' : ''}`, 'MEMORY')
-        if (out.op === 'add' || out.op === 'remove' || out.op === 'clear' || out.op === 'cancel' || out.op === 'done') void mem?.refresh()
+        if (out.op === 'add' || out.op === 'remove' || out.op === 'clear' || out.op === 'cancel' || out.op === 'done') {
+          void mem?.refresh()
+          // HUD (OGGI) and the Memoria drawer refresh right away, not at the next poll.
+          window.dispatchEvent(new CustomEvent(BRAIN_CHANGED_EVENT, { detail: { kind: out.kind, op: out.op } }))
+        }
         return out
       } catch {
         return null
